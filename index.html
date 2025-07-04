@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ROISALE - Calculadora de Proyección de Ventas</title>
+  
+  <!-- 1. Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'brand-bg': '#0b1120',
+            'brand-surface': '#172136',
+            'brand-card': '#11192b',
+            'brand-input': '#11192b',
+            'brand-border': '#334155',
+            'brand-text-primary': '#f1f5f9',
+            'brand-text-secondary': '#94a3b8',
+            'brand-accent': '#34d399',
+          },
+          animation: { 
+            'fade-in': 'fade-in 0.5s ease-out forwards',
+          },
+          keyframes: {
+            'fade-in': { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
+          },
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background-color: #0b1120; color: #f1f5f9; }
+    ::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-track { background: #0b1120; }
+    ::-webkit-scrollbar-thumb { background-color: #172136; border-radius: 8px; }
+    input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  </style>
+</head>
+<body>
+
+  <div id="root"></div>
+
+  <!-- 2. Scripts de React y Babel -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- 3. APLICACIÓN COMPLETA -->
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const SCENARIO_RATES = {
+      pessimistic: { ltRoas: 0.85, ltBump1Conversion: 0.07, ltBump2Conversion: 0.04, ltOtoConversion: 0.03, htConversion: 0.01 }, // 1%
+      realistic:   { ltRoas: 1.50, ltBump1Conversion: 0.10, ltBump2Conversion: 0.08, ltOtoConversion: 0.07, htConversion: 0.015 }, // 1.5%
+      optimistic:  { ltRoas: 3.00, ltBump1Conversion: 0.18, ltBump2Conversion: 0.15, ltOtoConversion: 0.10, htConversion: 0.02 }, // 2%
+    };
+    
+    const TOOLTIP_DEFINITIONS = {
+        ltRevenue: { title: "💰 Facturación Estimada (LT)", content: "Es el ingreso <b>bruto</b> que genera solo tu producto inicial.<br/><br/><b>Cálculo:</b> <code>Gasto Publicitario × ROAS (LT)</code><br/><b>Ejemplo:</b> Si inviertes $500 y tu ROAS es 1.50x, tu facturación será de $750." },
+        ltRoas: { title: "📈 ROAS (Low Ticket)", content: "El <b>Retorno de la Inversión Publicitaria</b>. Mide la eficiencia de tus anuncios para el producto inicial.<br/><br/><b>0.85x:</b> Por cada $1 que inviertes, recuperas $0.85 (pierdes dinero).<br/><b>1.50x:</b> Por cada $1, recuperas $1.50 (ganas $0.50).<br/><b>3.00x:</b> Por cada $1, recuperas $3.00 (ganas $2)." },
+        cpa: { title: "💸 Costo por Adquisición (CPA)", content: "Cuánto te cuesta, en promedio, conseguir un cliente para tu producto Low Ticket.<br/><br/><b>Cálculo:</b> <code>Gasto Publicitario / N° de Ventas LT</code><br/><b>Ejemplo:</b> Si inviertes $500 y logras 61 ventas, tu CPA es de $8.20." },
+        ltSales: { title: "🛒 Ventas Low Ticket", content: "El número de personas que compran tu producto inicial. Es la base para todo el funnel.<br/><br/><b>Cálculo:</b> <code>Facturación Estimada / Precio del Producto</code><br/><b>Ejemplo:</b> Si facturas $750 y tu producto cuesta $7, necesitas 107 ventas." },
+        bump1: { title: "➕ Ventas Bump 1", content: "Número de clientes que aceptan la <b>primera oferta adicional</b> (Bump) que aparece justo antes de pagar.<br/><br/><b>Cálculo:</b> <code>N° Ventas LT × % de Bump 1</code>" },
+        bump2: { title: "➕➕ Ventas Bump 2", content: "Número de clientes que aceptan la <b>segunda oferta adicional</b>.<br/><br/><b>Cálculo:</b> <code>N° Ventas LT × % de Bump 2</code>" },
+        oto: { title: "💥 Ventas OTO", content: "Número de clientes que compran la <b>Oferta de Única Vez</b> (OTO) después del pago inicial.<br/><br/><b>Cálculo:</b> <code>N° Ventas LT × % de OTO</code>" },
+        ht: { title: "💎 Ventas High Ticket", content: "Número de clientes que compran tu <b>producto de alto valor</b>.<br/><br/><b>Cálculo:</b> <code>N° Ventas LT × % de High Ticket</code>" },
+        totalProfit: { title: "✅ Beneficio Neto Global", content: "La ganancia final después de restar el gasto publicitario. <b>Esta es la métrica más importante.</b><br/><br/><b>Cálculo:</b> <code>Facturación Total - Gasto Publicitario</code>" },
+        totalRevenue: { title: "📊 Facturación Total", content: "La suma de <b>todos los ingresos</b> del funnel (Low Ticket + Bumps + OTO + High Ticket)." },
+        roi: { title: "🚀 Retorno de Inversión (ROI)", content: "Mide la rentabilidad neta de tu inversión. Te dice cuánta ganancia obtienes por cada dólar que gastas en publicidad.<br/><br/><b>Cálculo:</b> <code>(Beneficio Neto / Gasto Publicitario) × 100%</code>" },
+    };
+
+    const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val || 0);
+    const formatNumber = (val) => new Intl.NumberFormat('en-US').format(Math.floor(val || 0));
+    const formatMultiplier = (val) => `${(val || 0).toFixed(2)}x`;
+    const formatPercent = (val) => `${((val || 0) * 100).toFixed(1)}%`;
+
+    const InputField = ({ label, name, value, onChange, bgColor = 'bg-brand-input' }) => (<div><label htmlFor={name} className="block text-sm font-medium text-brand-text-secondary mb-1">{label}</label><div className="relative"><span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-brand-text-secondary">$</span><input type="number" name={name} id={name} value={value || ''} onChange={onChange} placeholder="0" className={`block w-full rounded-md border-brand-border ${bgColor} py-2 pl-7 pr-4 text-brand-text-primary shadow-sm focus:border-brand-accent focus:ring-brand-accent`} /></div></div>);
+    const ToggleSwitch = ({ label, enabled, onChange }) => (<label className="flex items-center justify-between cursor-pointer"><span className="font-medium text-brand-text-primary">{label}</span><div className="relative"><input type="checkbox" className="sr-only" checked={enabled} onChange={e => onChange(e.target.checked)} /><div className={`block w-14 h-8 rounded-full transition-colors ${enabled ? 'bg-brand-accent' : 'bg-gray-600'}`}></div><div className={`absolute left-1 top-1 bg-brand-surface w-6 h-6 rounded-full transition-transform ${enabled ? 'translate-x-6' : 'translate-x-0'}`}></div></div></label>);
+    const WelcomeScreen = () => (<div className="flex h-full w-full flex-col items-center justify-center p-4"><div className="animate-fade-in text-center"><h1 className="bg-gradient-to-br from-gray-200 via-gray-400 to-gray-600 bg-clip-text text-8xl font-extrabold tracking-tighter text-transparent">ROISALE</h1><p className="mt-4 max-w-md text-lg text-brand-text-secondary">Ingresa tu gasto publicitario para ver la proyección.</p></div></div>);
+    const InfoTooltip = ({ title, content, position = "center", direction = "up" }) => {
+        const positionClasses = { center: 'left-1/2 -translate-x-1/2', left: 'right-0' };
+        const directionClasses = { up: 'bottom-full mb-2', down: 'top-full mt-2' };
+        return (<span className="group relative"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="cursor-help text-gray-500/70 group-hover:text-white"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg><div className={`absolute z-30 w-80 transform rounded-xl bg-gray-900/80 p-4 text-sm text-white opacity-0 shadow-xl ring-1 ring-white/10 backdrop-blur-sm transition-all group-hover:opacity-100 pointer-events-none ${positionClasses[position]} ${directionClasses[direction]}`}><h4 className="font-bold mb-2">{title}</h4><p className="font-normal leading-relaxed text-gray-300" dangerouslySetInnerHTML={{ __html: content }} /></div></span>);
+    };
+    const MetricCard = ({ label, value, subtext, profit, fullWidth = false, tooltipData, tooltipPosition, tooltipDirection }) => {
+        let profitColor = 'text-brand-text-secondary';
+        if(profit > 0) profitColor = 'text-emerald-400';
+        if(profit < 0) profitColor = 'text-red-400';
+        return (<div className={`space-y-0.5 rounded-lg bg-brand-card p-3 ring-1 ring-white/5 ${fullWidth ? 'col-span-2 text-center' : ''}`}><div className="flex items-center gap-2 justify-center"><p className="text-sm text-brand-text-secondary">{label}</p>{tooltipData && <InfoTooltip title={tooltipData.title} content={tooltipData.content} position={tooltipPosition} direction={tooltipDirection} />}</div><p className="text-2xl font-bold">{value}</p>{subtext && <p className="text-xs text-brand-text-secondary">{subtext}</p>}{typeof profit !== 'undefined' && <p className={`text-xs font-semibold ${profitColor}`}>{profit > 0 ? '+' : ''}{formatCurrency(profit)}</p>}</div>);
+    };
+    const OfferCard = ({ label, sales, revenue, rate, tooltipData, tooltipPosition }) => (<div className="space-y-0.5 rounded-lg bg-brand-card p-3 ring-1 ring-white/5"><div className="flex justify-between items-center"><span className="flex items-center gap-2"><p className="text-sm font-semibold text-brand-text-secondary">{label}</p>{tooltipData && <InfoTooltip title={tooltipData.title} content={tooltipData.content} position={tooltipPosition} />}</span><p className="text-xs text-brand-text-secondary">{formatPercent(rate)}</p></div><p className="text-2xl font-bold">{formatNumber(sales)}</p><p className="text-sm text-brand-accent">{formatCurrency(revenue)}</p></div>);
+
+    const ScenarioColumn = ({ title, data, accentColor }) => {
+      if (!data) return null;
+      const profitColor = data.totalProfit >= 0 ? 'text-emerald-400' : 'text-red-400';
+      const tooltipPosition = title === 'Escenario Optimista' ? 'left' : 'center';
+
+      return (
+        <div className="flex flex-col rounded-xl bg-brand-surface shadow-2xl shadow-black/30 ring-1 ring-white/5">
+          <h3 className={`rounded-t-xl py-3 text-center text-xl font-bold text-white ${accentColor}`}>{title}</h3>
+          <div className="flex-grow space-y-4 p-3">
+            <div className="space-y-3"><h4 className="text-base font-semibold tracking-wide text-brand-text-secondary">1. Análisis Low Ticket</h4><div className="grid grid-cols-2 gap-3"><MetricCard label="Facturación Estimada (LT)" value={formatCurrency(data.ltRevenue)} profit={data.ltProfit} fullWidth={true} tooltipData={TOOLTIP_DEFINITIONS.ltRevenue} tooltipPosition={tooltipPosition} tooltipDirection="down"/><MetricCard label="ROAS" value={formatMultiplier(data.rates.ltRoas)} subtext="(Low Ticket)" tooltipData={TOOLTIP_DEFINITIONS.ltRoas} tooltipPosition={tooltipPosition} tooltipDirection="down"/><MetricCard label="CPA" value={formatCurrency(data.cpa)} subtext={`${formatPercent(data.cpaPercentOfPrice)} del precio`} tooltipData={TOOLTIP_DEFINITIONS.cpa} tooltipPosition={tooltipPosition} tooltipDirection="down"/><MetricCard label="Ventas Low Ticket" value={formatNumber(data.ltSales)} fullWidth={true} tooltipData={TOOLTIP_DEFINITIONS.ltSales} tooltipPosition={tooltipPosition} /></div></div>
+            <div className="border-t border-brand-border"></div>
+            <div className="space-y-3"><h4 className="text-base font-semibold tracking-wide text-brand-text-secondary">2. Desglose del Funnel</h4><div className="grid grid-cols-2 gap-3"><OfferCard label="Ventas Bump 1" sales={data.bump1Sales} revenue={data.bump1Revenue} rate={data.rates.ltBump1Conversion} tooltipData={TOOLTIP_DEFINITIONS.bump1} tooltipPosition={tooltipPosition}/><OfferCard label="Ventas Bump 2" sales={data.bump2Sales} revenue={data.bump2Revenue} rate={data.rates.ltBump2Conversion} tooltipData={TOOLTIP_DEFINITIONS.bump2} tooltipPosition={tooltipPosition}/><OfferCard label="Ventas OTO" sales={data.otoSales} revenue={data.otoRevenue} rate={data.rates.ltOtoConversion} tooltipData={TOOLTIP_DEFINITIONS.oto} tooltipPosition={tooltipPosition}/><OfferCard label="Ventas High Ticket" sales={data.htSales} revenue={data.htRevenue} rate={data.rates.htConversion} tooltipData={TOOLTIP_DEFINITIONS.ht} tooltipPosition={tooltipPosition}/></div></div>
+            <div className="border-t border-brand-border"></div>
+            <div className="space-y-3"><h4 className="text-base font-semibold tracking-wide text-brand-text-secondary">3. Resultados Globales</h4><div className="space-y-3 rounded-lg bg-brand-card p-4 text-center ring-1 ring-white/5"><div className="flex items-center justify-center gap-2"><p className="text-sm text-brand-text-secondary">Beneficio Neto Global</p><InfoTooltip title={TOOLTIP_DEFINITIONS.totalProfit.title} content={TOOLTIP_DEFINITIONS.totalProfit.content} position={tooltipPosition}/></div><p className={`text-4xl font-bold tracking-tight ${profitColor}`}>{formatCurrency(data.totalProfit)}</p><div className="flex justify-between border-t border-brand-border pt-3 text-sm"><div className="text-left flex-1"><div className="flex items-center gap-2"><p className="text-brand-text-secondary">Facturación Total</p><InfoTooltip title={TOOLTIP_DEFINITIONS.totalRevenue.title} content={TOOLTIP_DEFINITIONS.totalRevenue.content} position={tooltipPosition}/></div><p className="font-semibold text-base">{formatCurrency(data.totalRevenue)}</p></div><div className="text-right flex-1"><div className="flex items-center justify-end gap-2"><p className="text-brand-text-secondary">Retorno Inversión (ROI)</p><InfoTooltip title={TOOLTIP_DEFINITIONS.roi.title} content={TOOLTIP_DEFINITIONS.roi.content} position={tooltipPosition}/></div><p className="font-semibold text-base">{formatPercent(data.roi)}</p></div></div></div></div>
+          </div>
+        </div>
+      );
+    };
+
+    function App() {
+      const initialFormData = { adSpend: 0, lowTicketPrice: 0, highTicketPrice: 0, lowTicketBump1Price: 0, lowTicketBump2Price: 0, lowTicketOtoPrice: 0 };
+      const [formData, setFormData] = useState(initialFormData);
+      const [options, setOptions] = useState({ showOffers: true });
+      const [projection, setProjection] = useState(null);
+
+      const handleClear = () => setFormData(initialFormData);
+
+      useEffect(() => {
+        const handler = setTimeout(() => {
+          if (formData.adSpend > 0 && formData.lowTicketPrice > 0) {
+            const calculateScenario = (scenarioKey) => {
+              const rates = SCENARIO_RATES[scenarioKey];
+              const requiredInvestment = formData.adSpend;
+              const ltRevenue = requiredInvestment * rates.ltRoas;
+              const ltProfit = ltRevenue - requiredInvestment;
+              const ltSales = ltRevenue / formData.lowTicketPrice;
+              const cpa = ltSales > 0 ? requiredInvestment / ltSales : 0;
+              const cpaPercentOfPrice = formData.lowTicketPrice > 0 ? cpa / formData.lowTicketPrice : 0;
+              
+              const bump1Sales = (formData.lowTicketBump1Price > 0 && options.showOffers) ? Math.floor(ltSales * rates.ltBump1Conversion) : 0;
+              const bump1Revenue = bump1Sales * formData.lowTicketBump1Price;
+              const bump2Sales = (formData.lowTicketBump2Price > 0 && options.showOffers) ? Math.floor(ltSales * rates.ltBump2Conversion) : 0;
+              const bump2Revenue = bump2Sales * formData.lowTicketBump2Price;
+              const otoSales = (formData.lowTicketOtoPrice > 0 && options.showOffers) ? Math.floor(ltSales * rates.ltOtoConversion) : 0;
+              const otoRevenue = otoSales * formData.lowTicketOtoPrice;
+              const htSales = (formData.highTicketPrice > 0) ? Math.floor(ltSales * rates.htConversion) : 0;
+              const htRevenue = htSales * formData.highTicketPrice;
+
+              const totalRevenue = ltRevenue + bump1Revenue + bump2Revenue + otoRevenue + htRevenue;
+              const totalProfit = totalRevenue - requiredInvestment;
+              const roi = requiredInvestment > 0 ? totalProfit / requiredInvestment : 0;
+              
+              return { rates, ltRevenue, ltProfit, cpa, cpaPercentOfPrice, ltSales, bump1Sales, bump1Revenue, bump2Sales, bump2Revenue, otoSales, otoRevenue, htSales, htRevenue, totalProfit, totalRevenue, roi };
+            };
+            setProjection({ pessimistic: calculateScenario('pessimistic'), realistic: calculateScenario('realistic'), optimistic: calculateScenario('optimistic') });
+          } else { setProjection(null); }
+        }, 300);
+        return () => clearTimeout(handler);
+      }, [formData, options]);
+
+      return (
+        <div className="flex h-screen overflow-hidden">
+          <aside className="flex w-[380px] flex-shrink-0 flex-col border-r border-brand-border bg-brand-surface shadow-2xl shadow-black/30">
+            <header className="border-b border-brand-border p-5"><h1 className="text-xl font-bold tracking-tight">Calculadora de Proyección</h1><p className="text-sm text-brand-text-secondary">Define tus metas y descubre el potencial.</p></header>
+            <div className="flex-grow overflow-y-auto p-5 space-y-4">
+              <div className="space-y-3">
+                <InputField label="Gasto Publicitario Estimado" name="adSpend" value={formData.adSpend} onChange={e => setFormData(p => ({...p, adSpend: e.target.value}))} />
+                <InputField label="Precio Producto Low Ticket" name="lowTicketPrice" value={formData.lowTicketPrice} onChange={e => setFormData(p => ({...p, lowTicketPrice: e.target.value}))} />
+                <InputField label="Precio Producto High Ticket" name="highTicketPrice" value={formData.highTicketPrice} onChange={e => setFormData(p => ({...p, highTicketPrice: e.target.value}))} />
+              </div>
+              <div className="space-y-3 border-t border-brand-border pt-4">
+                <ToggleSwitch label="Ofertas Adicionales" enabled={options.showOffers} onChange={(val) => setOptions({ showOffers: val })} />
+                <div className={`transition-all duration-300 ease-in-out ${options.showOffers ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
+                  {options.showOffers && <div className="space-y-3 rounded-lg border border-brand-border bg-brand-bg/50 p-3"><InputField label="Precio Bump 1" name="lowTicketBump1Price" value={formData.lowTicketBump1Price} onChange={e => setFormData(p => ({...p, lowTicketBump1Price: e.target.value}))} bgColor="bg-[#0f1626]" /><InputField label="Precio Bump 2" name="lowTicketBump2Price" value={formData.lowTicketBump2Price} onChange={e => setFormData(p => ({...p, lowTicketBump2Price: e.target.value}))} bgColor="bg-[#0f1626]" /><InputField label="Precio OTO" name="lowTicketOtoPrice" value={formData.lowTicketOtoPrice} onChange={e => setFormData(p => ({...p, lowTicketOtoPrice: e.target.value}))} bgColor="bg-[#0f1626]" /></div>}
+                </div>
+                <div className="pt-2"><button onClick={handleClear} className="w-full text-sm font-semibold py-2 px-4 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-colors">Limpiar Datos</button></div>
+              </div>
+            </div>
+            <div className="border-t border-brand-border p-5 text-center space-y-3">
+              <p className="text-xs text-brand-text-secondary px-2">Estos datos son solo pronósticos estadísticos. El resultado final depende de tus anuncios, VSL, ofertas y tu empeño en hacer las cosas bien.</p>
+              <a href="https://croceads.com/roisale-pro/" target="_blank" rel="noopener noreferrer" className="block w-full rounded-lg bg-brand-accent text-black font-bold py-3 text-base shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(52,211,153,0.5)]">✨ ROISALE-PRO</a>
+              <p className="text-sm font-semibold text-brand-accent">Escala tu negocio con un acompañamiento</p>
+            </div>
+          </aside>
+          <main className="flex-1 overflow-y-auto p-6">
+            {projection ? <div className="grid h-full grid-cols-1 gap-6 lg:grid-cols-3 animate-fade-in"><ScenarioColumn title="Escenario Pesimista" data={projection.pessimistic} accentColor="bg-red-600/60" /><ScenarioColumn title="Escenario Realista" data={projection.realistic} accentColor="bg-blue-600/60" /><ScenarioColumn title="Escenario Optimista" data={projection.optimistic} accentColor="bg-emerald-600/60" /></div> : <WelcomeScreen />}
+          </main>
+        </div>
+      );
+    }
+    
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
